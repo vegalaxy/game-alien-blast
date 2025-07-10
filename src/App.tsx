@@ -9,7 +9,9 @@ import { useFaceDetection } from './hooks/useFaceDetection';
 function App() {
   const [isFirstGame, setIsFirstGame] = useState(true);
   const frameCountRef = useRef(0);
-  const FRAMES_TO_FIRE = 6;
+  const FRAMES_TO_FIRE = 3; // Reduced for more responsive firing
+  const lastFireTimeRef = useRef(0);
+  const FIRE_COOLDOWN = 150; // Minimum time between shots in milliseconds
 
   const {
     gameState,
@@ -41,17 +43,22 @@ function App() {
 
   // Handle firing logic based on face data
   useEffect(() => {
-    // Handle firing logic
     if (gameState.isRunning && faceData.isDetected) {
       if (faceData.isMouthOpen) {
         frameCountRef.current++;
-        if (frameCountRef.current >= FRAMES_TO_FIRE) {
+        const now = Date.now();
+        
+        if (frameCountRef.current >= FRAMES_TO_FIRE && 
+            now - lastFireTimeRef.current > FIRE_COOLDOWN) {
+          // Use current face position for more accurate targeting
           const targetX = faceData.x * window.innerWidth;
           const targetY = faceData.y * window.innerHeight;
           createProjectile(targetX, targetY);
           frameCountRef.current = 0;
+          lastFireTimeRef.current = now;
         }
       } else {
+        // Reset frame count when mouth closes for immediate response
         frameCountRef.current = 0;
       }
     }

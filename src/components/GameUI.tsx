@@ -57,8 +57,8 @@ export const GameUI: React.FC<GameUIProps> = ({
       {!faceDetected && (
         <div className="absolute bottom-20 left-1/2 transform -translate-x-1/2 bg-black/60 backdrop-blur-sm rounded-lg p-4 border border-white/20 text-center">
           <div className="text-white">
-            <div className="font-semibold mb-2">Position your face in the camera view</div>
-            <div className="text-sm text-white/80">Move your head to aim • Open your mouth to fire</div>
+            <div className="font-semibold mb-2">Center your face in the camera view</div>
+            <div className="text-sm text-white/80">Move your head to aim the crosshair • Open your mouth wide to fire</div>
           </div>
         </div>
       )}

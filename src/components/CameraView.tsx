@@ -16,7 +16,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
   onFrameProcess,
   isGameRunning
 }) => {
-  const [movementScale, setMovementScale] = useState(3);
+  const [movementScale, setMovementScale] = useState(4); // Slightly higher default for better control
   const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
@@ -57,19 +57,19 @@ export const CameraView: React.FC<CameraViewProps> = ({
           <div className="space-y-3">
             <div>
               <label className="block text-xs text-white/80 mb-1">
-                Movement Scale: {movementScale}
+                Sensitivity: {movementScale}
               </label>
               <input
                 type="range"
                 min="1"
-                max="10"
+                max="8"
                 value={movementScale}
                 onChange={(e) => setMovementScale(parseInt(e.target.value))}
                 className="w-full h-2 bg-white/20 rounded-lg appearance-none cursor-pointer slider"
               />
               <div className="flex justify-between text-xs text-white/60 mt-1">
                 <span>1</span>
-                <span>10</span>
+                <span>8</span>
               </div>
             </div>
           </div>
@@ -80,11 +80,11 @@ export const CameraView: React.FC<CameraViewProps> = ({
         <div className="text-xs text-white/80 space-y-1">
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 bg-green-400 rounded-full"></div>
-            <span>Move head to aim</span>
+            <span>Move head to aim crosshair</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 bg-pink-400 rounded-full"></div>
-            <span>Open mouth to fire</span>
+            <span>Open mouth wide to fire</span>
           </div>
         </div>
       </div>
