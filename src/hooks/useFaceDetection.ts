@@ -17,14 +17,11 @@ export const useFaceDetection = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const animationRef = useRef<number>();
-  const startPointRef = useRef<{ x: number; y: number } | null>(null);
-  const prevPointRef = useRef<{ x: number; y: number } | null>(null);
   
   // Mouth detection calibration
   const mouthBaselineRef = useRef<number | null>(null);
   const mouthHistoryRef = useRef<number[]>([]);
-  const MOUTH_HISTORY_SIZE = 5;
-  const MOUTH_THRESHOLD_MULTIPLIER = 1.8; // More sensitive threshold
+  const MOUTH_HISTORY_SIZE = 10;
 
   const initializeFaceDetection = useCallback(async () => {
     try {
@@ -58,7 +55,7 @@ export const useFaceDetection = () => {
         video: { 
           width: 720, 
           height: 480,
-          frameRate: { ideal: 30 } // Higher frame rate for better responsiveness
+          frameRate: { ideal: 30 }
         }
       });
       
@@ -82,118 +79,39 @@ export const useFaceDetection = () => {
     }
   }, []);
 
-  const detectMovement = useCallback((newPoint: { x: number; y: number }, movementScale: number) => {
-    if (!startPointRef.current) {
-      startPointRef.current = { x: newPoint.x, y: newPoint.y };
-      prevPointRef.current = { x: newPoint.x, y: newPoint.y };
-      return prevPointRef.current;
-    }
-
-    // Apply smoothing to reduce jitter
-    const smoothingFactor = 0.7;
-    const movement = {
-      newX: (newPoint.x - startPointRef.current.x) * movementScale,
-      newY: (newPoint.y - startPointRef.current.y) * movementScale
-    };
-
-    const targetPoint = {
-      x: startPointRef.current.x + movement.newX,
-      y: startPointRef.current.y + movement.newY
-    };
-
-    // Smooth the movement
-    prevPointRef.current = {
-      x: prevPointRef.current.x * (1 - smoothingFactor) + targetPoint.x * smoothingFactor,
-      y: prevPointRef.current.y * (1 - smoothingFactor) + targetPoint.y * smoothingFactor
-    };
-
-    return prevPointRef.current;
-  }, []);
-
   const detectMouthOpen = useCallback((landmarks: any[]) => {
     if (!landmarks[0]) return false;
     
-    // Use multiple mouth landmarks for better accuracy
-    // Upper lip landmarks: 13, 14, 15
-    // Lower lip landmarks: 17, 18, 19
-    const upperLipCenter = landmarks[0][13]; // Upper lip center
-    const lowerLipCenter = landmarks[0][14]; // Lower lip center
-    const upperLipLeft = landmarks[0][12];   // Upper lip left
-    const lowerLipLeft = landmarks[0][15];   // Lower lip left
-    const upperLipRight = landmarks[0][16];  // Upper lip right
-    const lowerLipRight = landmarks[0][17];  // Lower lip right
+    // Use the most reliable mouth landmarks
+    const upperLip = landmarks[0][13]; // Upper lip center
+    const lowerLip = landmarks[0][14]; // Lower lip center
     
-    if (!upperLipCenter || !lowerLipCenter || !upperLipLeft || !lowerLipLeft || !upperLipRight || !lowerLipRight) {
-      return false;
-    }
+    if (!upperLip || !lowerLip) return false;
     
-    // Calculate mouth opening using multiple points for better accuracy
-    const centerDistance = Math.sqrt(
-      (lowerLipCenter.x - upperLipCenter.x) ** 2 + 
-      (lowerLipCenter.y - upperLipCenter.y) ** 2 + 
-      (lowerLipCenter.z - upperLipCenter.z) ** 2
+    const distance = Math.sqrt(
+      (lowerLip.x - upperLip.x) ** 2 + 
+      (lowerLip.y - upperLip.y) ** 2 + 
+      (lowerLip.z - upperLip.z) ** 2
     );
     
-    const leftDistance = Math.sqrt(
-      (lowerLipLeft.x - upperLipLeft.x) ** 2 + 
-      (lowerLipLeft.y - upperLipLeft.y) ** 2 + 
-      (lowerLipLeft.z - upperLipLeft.z) ** 2
-    );
-    
-    const rightDistance = Math.sqrt(
-      (lowerLipRight.x - upperLipRight.x) ** 2 + 
-      (lowerLipRight.y - upperLipRight.y) ** 2 + 
-      (lowerLipRight.z - upperLipRight.z) ** 2
-    );
-    
-    // Average the distances for more stable detection
-    const avgDistance = (centerDistance + leftDistance + rightDistance) / 3;
-    
-    // Maintain a history for baseline calibration
-    mouthHistoryRef.current.push(avgDistance);
+    // Build baseline for closed mouth
+    mouthHistoryRef.current.push(distance);
     if (mouthHistoryRef.current.length > MOUTH_HISTORY_SIZE) {
       mouthHistoryRef.current.shift();
     }
     
-    // Establish baseline (closed mouth) if we have enough samples
     if (mouthHistoryRef.current.length >= MOUTH_HISTORY_SIZE && mouthBaselineRef.current === null) {
       mouthBaselineRef.current = Math.min(...mouthHistoryRef.current);
     }
     
-    // Use dynamic threshold based on baseline
     if (mouthBaselineRef.current !== null) {
-      const threshold = mouthBaselineRef.current * MOUTH_THRESHOLD_MULTIPLIER;
-      return avgDistance > threshold;
+      return distance > mouthBaselineRef.current * 2.2; // More sensitive
     }
     
-    // Fallback to static threshold if baseline not established
-    return avgDistance > 0.015;
+    return distance > 0.018; // Fallback threshold
   }, []);
 
-  const getBetweenEyesPoint = useCallback((landmarks: any[]) => {
-    if (!landmarks[0]) return null;
-    
-    // Use the correct MediaPipe face landmark indices for between eyes
-    // These are the actual landmark indices from MediaPipe's 468-point face model
-    const leftEyeInner = landmarks[0][133];   // Left eye inner corner
-    const rightEyeInner = landmarks[0][362];  // Right eye inner corner
-    const foreheadCenter = landmarks[0][9];   // Forehead center point
-    const noseTip = landmarks[0][1];          // Nose tip
-    
-    if (!leftEyeInner || !rightEyeInner || !foreheadCenter) return null;
-    
-    // Calculate the point exactly between the inner eye corners
-    // This gives us the precise horizontal center between the eyes
-    const betweenEyes = {
-      x: (leftEyeInner.x + rightEyeInner.x) / 2,
-      y: (leftEyeInner.y + rightEyeInner.y) / 2, // Average Y position of inner eye corners
-      z: (leftEyeInner.z + rightEyeInner.z) / 2
-    };
-    
-    return betweenEyes;
-  }, []);
-
-  const processFrame = useCallback(async (movementScale: number = 3) => {
+  const processFrame = useCallback(async (movementScale: number = 4) => {
     if (!faceLandmarker || !videoRef.current) {
       return;
     }
@@ -206,69 +124,69 @@ export const useFaceDetection = () => {
       const results = await faceLandmarker.detectForVideo(videoRef.current, Date.now());
       
       if (results.faceLandmarks.length > 0) {
-        const landmarks = results.faceLandmarks;
-        const isOpenMouth = detectMouthOpen(landmarks);
-        const betweenEyesPoint = getBetweenEyesPoint(landmarks);
+        const landmarks = results.faceLandmarks[0];
+        const isOpenMouth = detectMouthOpen([landmarks]);
         
-        if (betweenEyesPoint) {
-          const movement = detectMovement(betweenEyesPoint, movementScale);
-          const mirroredX = 1 - movement.x; // Mirror the camera
+        // SIMPLE APPROACH: Just use the nose bridge landmark directly
+        // Landmark 6 is the nose bridge - right between the eyes
+        const noseBridge = landmarks[6];
+        
+        if (noseBridge) {
+          // Apply movement scaling and mirror for camera
+          const scaledX = 0.5 + (noseBridge.x - 0.5) * movementScale;
+          const scaledY = 0.5 + (noseBridge.y - 0.5) * movementScale;
+          
+          // Mirror X axis and clamp values
+          const mirroredX = 1 - scaledX;
           
           setFaceData({
-            x: Math.max(0, Math.min(1, mirroredX)), // Clamp to valid range
-            y: Math.max(0, Math.min(1, movement.y)), // Clamp to valid range
+            x: Math.max(0, Math.min(1, mirroredX)),
+            y: Math.max(0, Math.min(1, scaledY)),
             isDetected: true,
             isMouthOpen: isOpenMouth
           });
 
-          // Draw face detection visualization
+          // Draw visualization
           if (canvasRef.current) {
             const canvas = canvasRef.current;
             const ctx = canvas.getContext('2d');
             if (ctx) {
               ctx.clearRect(0, 0, canvas.width, canvas.height);
               
-              // Draw face landmarks for debugging (optional)
-              ctx.strokeStyle = 'rgba(0, 255, 136, 0.3)';
-              ctx.lineWidth = 1;
-              
-              // Draw face outline
-              for (let i = 0; i < landmarks[0].length; i++) {
-                const landmark = landmarks[0][i];
-                ctx.beginPath();
-                ctx.arc(
-                  landmark.x * canvas.width,
-                  landmark.y * canvas.height,
-                  1,
-                  0,
-                  2 * Math.PI
-                );
-                ctx.fillStyle = 'rgba(0, 255, 136, 0.2)';
-                ctx.fill();
-              }
-              
-              // Draw between-eyes point (main tracking point)
+              // Draw the nose bridge point (between eyes)
               ctx.beginPath();
               ctx.arc(
-                betweenEyesPoint.x * canvas.width,
-                betweenEyesPoint.y * canvas.height,
-                6,
+                noseBridge.x * canvas.width,
+                noseBridge.y * canvas.height,
+                8,
                 0,
                 2 * Math.PI
               );
               ctx.fillStyle = isOpenMouth ? '#ff0088' : '#00ff88';
               ctx.shadowColor = isOpenMouth ? '#ff0088' : '#00ff88';
-              ctx.shadowBlur = 10;
+              ctx.shadowBlur = 15;
               ctx.fill();
               ctx.shadowBlur = 0;
               
-              // Draw mouth status indicator
-              ctx.font = '12px Arial';
+              // Draw crosshair at nose bridge
+              ctx.strokeStyle = isOpenMouth ? '#ff0088' : '#00ff88';
+              ctx.lineWidth = 2;
+              ctx.beginPath();
+              // Horizontal line
+              ctx.moveTo(noseBridge.x * canvas.width - 10, noseBridge.y * canvas.height);
+              ctx.lineTo(noseBridge.x * canvas.width + 10, noseBridge.y * canvas.height);
+              // Vertical line
+              ctx.moveTo(noseBridge.x * canvas.width, noseBridge.y * canvas.height - 10);
+              ctx.lineTo(noseBridge.x * canvas.width, noseBridge.y * canvas.height + 10);
+              ctx.stroke();
+              
+              // Status text
+              ctx.font = '14px Arial';
               ctx.fillStyle = isOpenMouth ? '#ff0088' : '#00ff88';
               ctx.fillText(
-                isOpenMouth ? 'FIRING' : 'READY',
+                isOpenMouth ? 'FIRING!' : 'READY',
                 10,
-                canvas.height - 10
+                canvas.height - 15
               );
             }
           }
@@ -280,17 +198,16 @@ export const useFaceDetection = () => {
           isMouthOpen: false 
         }));
         
-        // Reset calibration when face is lost
+        // Reset mouth calibration
         mouthBaselineRef.current = null;
         mouthHistoryRef.current = [];
       }
     } catch (err) {
       console.error('Frame processing error:', err);
     }
-  }, [faceLandmarker, detectMovement, detectMouthOpen, getBetweenEyesPoint]);
+  }, [faceLandmarker, detectMouthOpen]);
 
-  // Start processing loop with higher frequency for better responsiveness
-  const startProcessingLoop = useCallback((movementScale: number = 3) => {
+  const startProcessingLoop = useCallback((movementScale: number = 4) => {
     if (animationRef.current) {
       cancelAnimationFrame(animationRef.current);
     }
