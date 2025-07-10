@@ -18,10 +18,9 @@ export const useFaceDetection = () => {
   const streamRef = useRef<MediaStream | null>(null);
   const animationRef = useRef<number>();
   
-  // Mouth detection calibration
-  const mouthBaselineRef = useRef<number | null>(null);
-  const mouthHistoryRef = useRef<number[]>([]);
-  const MOUTH_HISTORY_SIZE = 10;
+  // Movement tracking - exactly like the reference
+  const startPointRef = useRef<{ x: number; y: number } | null>(null);
+  const prevPointRef = useRef<{ x: number; y: number } | null>(null);
 
   const initializeFaceDetection = useCallback(async () => {
     try {
@@ -52,11 +51,7 @@ export const useFaceDetection = () => {
   const startCamera = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { 
-          width: 720, 
-          height: 480,
-          frameRate: { ideal: 30 }
-        }
+        video: true
       });
       
       if (videoRef.current) {
@@ -79,39 +74,43 @@ export const useFaceDetection = () => {
     }
   }, []);
 
-  const detectMouthOpen = useCallback((landmarks: any[]) => {
-    if (!landmarks[0]) return false;
-    
-    // Use the most reliable mouth landmarks
-    const upperLip = landmarks[0][13]; // Upper lip center
-    const lowerLip = landmarks[0][14]; // Lower lip center
-    
-    if (!upperLip || !lowerLip) return false;
-    
-    const distance = Math.sqrt(
-      (lowerLip.x - upperLip.x) ** 2 + 
-      (lowerLip.y - upperLip.y) ** 2 + 
-      (lowerLip.z - upperLip.z) ** 2
-    );
-    
-    // Build baseline for closed mouth
-    mouthHistoryRef.current.push(distance);
-    if (mouthHistoryRef.current.length > MOUTH_HISTORY_SIZE) {
-      mouthHistoryRef.current.shift();
-    }
-    
-    if (mouthHistoryRef.current.length >= MOUTH_HISTORY_SIZE && mouthBaselineRef.current === null) {
-      mouthBaselineRef.current = Math.min(...mouthHistoryRef.current);
-    }
-    
-    if (mouthBaselineRef.current !== null) {
-      return distance > mouthBaselineRef.current * 2.2;
-    }
-    
-    return distance > 0.018;
+  // Distance calculation - exactly like reference
+  const distance2Points = useCallback((point1: any, point2: any) => {
+    return Math.sqrt((point2.x - point1.x)**2 + (point2.y - point1.y)**2 + (point2.z - point1.z)**2);
   }, []);
 
-  const processFrame = useCallback(async (movementScale: number = 4) => {
+  // Movement scale calculation - exactly like reference
+  const getMovementScale = useCallback((point1: any, point2: any, scaleRatio: number) => {
+    return {
+      newX: (point2.x - point1.x) * scaleRatio,
+      newY: (point2.y - point1.y) * scaleRatio
+    };
+  }, []);
+
+  // Movement detection - exactly like reference
+  const detectMovement = useCallback((newPoint: any, movementScale: number) => {
+    if (!startPointRef.current || !startPointRef.current.x || !startPointRef.current.y) {
+      startPointRef.current = { x: newPoint.x, y: newPoint.y };
+      prevPointRef.current = { x: newPoint.x, y: newPoint.y };
+      return prevPointRef.current;
+    }
+    
+    const movement = getMovementScale(startPointRef.current, newPoint, movementScale);
+    prevPointRef.current.x = startPointRef.current.x + movement.newX;
+    prevPointRef.current.y = startPointRef.current.y + movement.newY;
+    
+    return {
+      x: prevPointRef.current.x,
+      y: prevPointRef.current.y
+    };
+  }, [getMovementScale]);
+
+  // Mouth detection - exactly like reference
+  const detectMouthOpen = useCallback((landmarks: any[]) => {
+    return distance2Points(landmarks[0][13], landmarks[0][14]) > 0.02;
+  }, [distance2Points]);
+
+  const processFrame = useCallback(async (movementScale: number = 3) => {
     if (!faceLandmarker || !videoRef.current) {
       return;
     }
@@ -124,119 +123,52 @@ export const useFaceDetection = () => {
       const results = await faceLandmarker.detectForVideo(videoRef.current, Date.now());
       
       if (results.faceLandmarks.length > 0) {
-        const landmarks = results.faceLandmarks[0];
-        const isOpenMouth = detectMouthOpen([landmarks]);
+        const landmarks = results.faceLandmarks;
+        const isOpenMouth = detectMouthOpen(landmarks);
         
-        // Let's try multiple approaches and see which one works
-        // Approach 1: Center between left and right eye centers
-        const leftEye = landmarks[33];   // Left eye center
-        const rightEye = landmarks[263]; // Right eye center
+        // Use landmark 8 - exactly like the reference code
+        const trackingPoint = landmarks[0][8]; // between eyes
+        const movement = detectMovement(trackingPoint, movementScale);
         
-        // Approach 2: Nose tip
-        const noseTip = landmarks[1];
+        // Mirror camera - exactly like reference
+        const newX = window.innerWidth - (movement.x * window.innerWidth);
+        const newY = movement.y * window.innerHeight;
         
-        // Approach 3: Forehead center
-        const foreheadCenter = landmarks[9];
+        // Convert back to normalized coordinates for our system
+        const normalizedX = newX / window.innerWidth;
+        const normalizedY = newY / window.innerHeight;
         
-        // Use the center between eyes as primary
-        let trackingPoint = leftEye && rightEye ? {
-          x: (leftEye.x + rightEye.x) / 2,
-          y: (leftEye.y + rightEye.y) / 2,
-          z: (leftEye.z + rightEye.z) / 2
-        } : noseTip || foreheadCenter;
-        
-        if (trackingPoint) {
-          // Direct mapping without complex scaling - let's see raw coordinates first
-          const rawX = trackingPoint.x;
-          const rawY = trackingPoint.y;
-          
-          // Simple mirror for camera effect
-          const mirroredX = 1 - rawX;
-          
-          setFaceData({
-            x: mirroredX,
-            y: rawY,
-            isDetected: true,
-            isMouthOpen: isOpenMouth
-          });
+        setFaceData({
+          x: normalizedX,
+          y: normalizedY,
+          isDetected: true,
+          isMouthOpen: isOpenMouth
+        });
 
-          // Enhanced visualization to debug
-          if (canvasRef.current) {
-            const canvas = canvasRef.current;
-            const ctx = canvas.getContext('2d');
-            if (ctx) {
-              ctx.clearRect(0, 0, canvas.width, canvas.height);
-              
-              // Draw all key landmarks for debugging
-              if (leftEye && rightEye) {
-                // Left eye
-                ctx.beginPath();
-                ctx.arc(leftEye.x * canvas.width, leftEye.y * canvas.height, 4, 0, 2 * Math.PI);
-                ctx.fillStyle = '#ff0000';
-                ctx.fill();
-                
-                // Right eye
-                ctx.beginPath();
-                ctx.arc(rightEye.x * canvas.width, rightEye.y * canvas.height, 4, 0, 2 * Math.PI);
-                ctx.fillStyle = '#0000ff';
-                ctx.fill();
-                
-                // Center between eyes (our tracking point)
-                ctx.beginPath();
-                ctx.arc(trackingPoint.x * canvas.width, trackingPoint.y * canvas.height, 8, 0, 2 * Math.PI);
-                ctx.fillStyle = isOpenMouth ? '#ff0088' : '#00ff88';
-                ctx.shadowColor = isOpenMouth ? '#ff0088' : '#00ff88';
-                ctx.shadowBlur = 15;
-                ctx.fill();
-                ctx.shadowBlur = 0;
-                
-                // Draw crosshair at tracking point
-                ctx.strokeStyle = isOpenMouth ? '#ff0088' : '#00ff88';
-                ctx.lineWidth = 3;
-                ctx.beginPath();
-                // Horizontal line
-                ctx.moveTo(trackingPoint.x * canvas.width - 15, trackingPoint.y * canvas.height);
-                ctx.lineTo(trackingPoint.x * canvas.width + 15, trackingPoint.y * canvas.height);
-                // Vertical line
-                ctx.moveTo(trackingPoint.x * canvas.width, trackingPoint.y * canvas.height - 15);
-                ctx.lineTo(trackingPoint.x * canvas.width, trackingPoint.y * canvas.height + 15);
-                ctx.stroke();
-              }
-              
-              // Status and debug info
-              ctx.font = '12px Arial';
-              ctx.fillStyle = '#ffffff';
-              ctx.fillText(`Raw: ${rawX.toFixed(3)}, ${rawY.toFixed(3)}`, 10, 20);
-              ctx.fillText(`Mirrored: ${mirroredX.toFixed(3)}, ${rawY.toFixed(3)}`, 10, 35);
-              ctx.fillText(isOpenMouth ? 'MOUTH: OPEN' : 'MOUTH: CLOSED', 10, 50);
-              
-              // Draw labels
-              ctx.fillStyle = '#ff0000';
-              ctx.fillText('L', leftEye ? leftEye.x * canvas.width - 10 : 0, leftEye ? leftEye.y * canvas.height - 10 : 0);
-              ctx.fillStyle = '#0000ff';
-              ctx.fillText('R', rightEye ? rightEye.x * canvas.width + 10 : 0, rightEye ? rightEye.y * canvas.height - 10 : 0);
-              ctx.fillStyle = '#00ff88';
-              ctx.fillText('CENTER', trackingPoint.x * canvas.width + 10, trackingPoint.y * canvas.height - 10);
-            }
+        // Draw visualization - exactly like reference
+        if (canvasRef.current) {
+          const canvas = canvasRef.current;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+            
+            // Draw the tracking point - exactly like reference
+            ctx.beginPath();
+            ctx.arc(trackingPoint.x * canvas.width, trackingPoint.y * canvas.height, 4, 0, 2 * Math.PI);
+            ctx.fillStyle = '#30FF30';
+            ctx.fill();
           }
         }
       } else {
-        setFaceData(prev => ({ 
-          ...prev, 
-          isDetected: false,
-          isMouthOpen: false 
-        }));
-        
-        // Reset mouth calibration
-        mouthBaselineRef.current = null;
-        mouthHistoryRef.current = [];
+        setFaceData(prev => ({ ...prev, isDetected: false, isMouthOpen: false }));
       }
     } catch (err) {
       console.error('Frame processing error:', err);
     }
-  }, [faceLandmarker, detectMouthOpen]);
+  }, [faceLandmarker, detectMovement, detectMouthOpen]);
 
-  const startProcessingLoop = useCallback((movementScale: number = 4) => {
+  const startProcessingLoop = useCallback((movementScale: number = 3) => {
     if (animationRef.current) {
       cancelAnimationFrame(animationRef.current);
     }
@@ -257,9 +189,9 @@ export const useFaceDetection = () => {
       cancelAnimationFrame(animationRef.current);
     }
     
-    // Reset calibration
-    mouthBaselineRef.current = null;
-    mouthHistoryRef.current = [];
+    // Reset movement tracking
+    startPointRef.current = null;
+    prevPointRef.current = null;
   }, []);
 
   useEffect(() => {

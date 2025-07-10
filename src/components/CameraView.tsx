@@ -16,7 +16,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
   onFrameProcess,
   isGameRunning
 }) => {
-  const [movementScale, setMovementScale] = useState(4); // Slightly higher default for better control
+  const [movementScale, setMovementScale] = useState(3); // Match reference default
   const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
@@ -62,14 +62,14 @@ export const CameraView: React.FC<CameraViewProps> = ({
               <input
                 type="range"
                 min="1"
-                max="8"
+                max="10"
                 value={movementScale}
                 onChange={(e) => setMovementScale(parseInt(e.target.value))}
                 className="w-full h-2 bg-white/20 rounded-lg appearance-none cursor-pointer slider"
               />
               <div className="flex justify-between text-xs text-white/60 mt-1">
                 <span>1</span>
-                <span>8</span>
+                <span>10</span>
               </div>
             </div>
           </div>
