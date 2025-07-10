@@ -118,13 +118,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     // Draw face tracking point
     const faceX = currentFacePosition.x * canvas.width;
     const faceY = currentFacePosition.y * canvas.height;
-    ctx.beginPath();
-    ctx.arc(faceX, faceY, 4, 0, Math.PI * 2);
-    ctx.fillStyle = '#00ff88';
-    ctx.shadowColor = '#00ff88';
-    ctx.shadowBlur = 10;
-    ctx.fill();
-    ctx.shadowBlur = 0;
 
     // Update and draw particles
     onGameStateUpdate(prev => ({
