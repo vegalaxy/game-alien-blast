@@ -173,19 +173,21 @@ export const useFaceDetection = () => {
   const getBetweenEyesPoint = useCallback((landmarks: any[]) => {
     if (!landmarks[0]) return null;
     
-    // Use correct MediaPipe face landmark indices
-    const leftEyeInner = landmarks[0][133];  // Left eye inner corner
-    const rightEyeInner = landmarks[0][362]; // Right eye inner corner
-    const noseBridge = landmarks[0][6];      // Nose bridge (between eyes)
+    // Use the correct MediaPipe face landmark indices for between eyes
+    // These are the actual landmark indices from MediaPipe's 468-point face model
+    const leftEyeInner = landmarks[0][133];   // Left eye inner corner
+    const rightEyeInner = landmarks[0][362];  // Right eye inner corner
+    const foreheadCenter = landmarks[0][9];   // Forehead center point
+    const noseTip = landmarks[0][1];          // Nose tip
     
-    if (!leftEyeInner || !rightEyeInner || !noseBridge) return null;
+    if (!leftEyeInner || !rightEyeInner || !foreheadCenter) return null;
     
-    // Use the nose bridge point as it's naturally between the eyes
-    // and combine with eye inner corners for better accuracy
+    // Calculate the point exactly between the inner eye corners
+    // This gives us the precise horizontal center between the eyes
     const betweenEyes = {
       x: (leftEyeInner.x + rightEyeInner.x) / 2,
-      y: noseBridge.y, // Use nose bridge Y for better vertical positioning
-      z: noseBridge.z
+      y: (leftEyeInner.y + rightEyeInner.y) / 2, // Average Y position of inner eye corners
+      z: (leftEyeInner.z + rightEyeInner.z) / 2
     };
     
     return betweenEyes;
