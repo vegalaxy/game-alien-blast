@@ -105,10 +105,10 @@ export const useFaceDetection = () => {
     }
     
     if (mouthBaselineRef.current !== null) {
-      return distance > mouthBaselineRef.current * 2.2; // More sensitive
+      return distance > mouthBaselineRef.current * 2.2;
     }
     
-    return distance > 0.018; // Fallback threshold
+    return distance > 0.018;
   }, []);
 
   const processFrame = useCallback(async (movementScale: number = 4) => {
@@ -127,67 +127,96 @@ export const useFaceDetection = () => {
         const landmarks = results.faceLandmarks[0];
         const isOpenMouth = detectMouthOpen([landmarks]);
         
-        // SIMPLE APPROACH: Just use the nose bridge landmark directly
-        // Landmark 6 is the nose bridge - right between the eyes
-        const noseBridge = landmarks[6];
+        // Let's try multiple approaches and see which one works
+        // Approach 1: Center between left and right eye centers
+        const leftEye = landmarks[33];   // Left eye center
+        const rightEye = landmarks[263]; // Right eye center
         
-        if (noseBridge) {
-          // Apply movement scaling and mirror for camera
-          const scaledX = 0.5 + (noseBridge.x - 0.5) * movementScale;
-          const scaledY = 0.5 + (noseBridge.y - 0.5) * movementScale;
+        // Approach 2: Nose tip
+        const noseTip = landmarks[1];
+        
+        // Approach 3: Forehead center
+        const foreheadCenter = landmarks[9];
+        
+        // Use the center between eyes as primary
+        let trackingPoint = leftEye && rightEye ? {
+          x: (leftEye.x + rightEye.x) / 2,
+          y: (leftEye.y + rightEye.y) / 2,
+          z: (leftEye.z + rightEye.z) / 2
+        } : noseTip || foreheadCenter;
+        
+        if (trackingPoint) {
+          // Direct mapping without complex scaling - let's see raw coordinates first
+          const rawX = trackingPoint.x;
+          const rawY = trackingPoint.y;
           
-          // Mirror X axis and clamp values
-          const mirroredX = 1 - scaledX;
+          // Simple mirror for camera effect
+          const mirroredX = 1 - rawX;
           
           setFaceData({
-            x: Math.max(0, Math.min(1, mirroredX)),
-            y: Math.max(0, Math.min(1, scaledY)),
+            x: mirroredX,
+            y: rawY,
             isDetected: true,
             isMouthOpen: isOpenMouth
           });
 
-          // Draw visualization
+          // Enhanced visualization to debug
           if (canvasRef.current) {
             const canvas = canvasRef.current;
             const ctx = canvas.getContext('2d');
             if (ctx) {
               ctx.clearRect(0, 0, canvas.width, canvas.height);
               
-              // Draw the nose bridge point (between eyes)
-              ctx.beginPath();
-              ctx.arc(
-                noseBridge.x * canvas.width,
-                noseBridge.y * canvas.height,
-                8,
-                0,
-                2 * Math.PI
-              );
-              ctx.fillStyle = isOpenMouth ? '#ff0088' : '#00ff88';
-              ctx.shadowColor = isOpenMouth ? '#ff0088' : '#00ff88';
-              ctx.shadowBlur = 15;
-              ctx.fill();
-              ctx.shadowBlur = 0;
+              // Draw all key landmarks for debugging
+              if (leftEye && rightEye) {
+                // Left eye
+                ctx.beginPath();
+                ctx.arc(leftEye.x * canvas.width, leftEye.y * canvas.height, 4, 0, 2 * Math.PI);
+                ctx.fillStyle = '#ff0000';
+                ctx.fill();
+                
+                // Right eye
+                ctx.beginPath();
+                ctx.arc(rightEye.x * canvas.width, rightEye.y * canvas.height, 4, 0, 2 * Math.PI);
+                ctx.fillStyle = '#0000ff';
+                ctx.fill();
+                
+                // Center between eyes (our tracking point)
+                ctx.beginPath();
+                ctx.arc(trackingPoint.x * canvas.width, trackingPoint.y * canvas.height, 8, 0, 2 * Math.PI);
+                ctx.fillStyle = isOpenMouth ? '#ff0088' : '#00ff88';
+                ctx.shadowColor = isOpenMouth ? '#ff0088' : '#00ff88';
+                ctx.shadowBlur = 15;
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                
+                // Draw crosshair at tracking point
+                ctx.strokeStyle = isOpenMouth ? '#ff0088' : '#00ff88';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                // Horizontal line
+                ctx.moveTo(trackingPoint.x * canvas.width - 15, trackingPoint.y * canvas.height);
+                ctx.lineTo(trackingPoint.x * canvas.width + 15, trackingPoint.y * canvas.height);
+                // Vertical line
+                ctx.moveTo(trackingPoint.x * canvas.width, trackingPoint.y * canvas.height - 15);
+                ctx.lineTo(trackingPoint.x * canvas.width, trackingPoint.y * canvas.height + 15);
+                ctx.stroke();
+              }
               
-              // Draw crosshair at nose bridge
-              ctx.strokeStyle = isOpenMouth ? '#ff0088' : '#00ff88';
-              ctx.lineWidth = 2;
-              ctx.beginPath();
-              // Horizontal line
-              ctx.moveTo(noseBridge.x * canvas.width - 10, noseBridge.y * canvas.height);
-              ctx.lineTo(noseBridge.x * canvas.width + 10, noseBridge.y * canvas.height);
-              // Vertical line
-              ctx.moveTo(noseBridge.x * canvas.width, noseBridge.y * canvas.height - 10);
-              ctx.lineTo(noseBridge.x * canvas.width, noseBridge.y * canvas.height + 10);
-              ctx.stroke();
+              // Status and debug info
+              ctx.font = '12px Arial';
+              ctx.fillStyle = '#ffffff';
+              ctx.fillText(`Raw: ${rawX.toFixed(3)}, ${rawY.toFixed(3)}`, 10, 20);
+              ctx.fillText(`Mirrored: ${mirroredX.toFixed(3)}, ${rawY.toFixed(3)}`, 10, 35);
+              ctx.fillText(isOpenMouth ? 'MOUTH: OPEN' : 'MOUTH: CLOSED', 10, 50);
               
-              // Status text
-              ctx.font = '14px Arial';
-              ctx.fillStyle = isOpenMouth ? '#ff0088' : '#00ff88';
-              ctx.fillText(
-                isOpenMouth ? 'FIRING!' : 'READY',
-                10,
-                canvas.height - 15
-              );
+              // Draw labels
+              ctx.fillStyle = '#ff0000';
+              ctx.fillText('L', leftEye ? leftEye.x * canvas.width - 10 : 0, leftEye ? leftEye.y * canvas.height - 10 : 0);
+              ctx.fillStyle = '#0000ff';
+              ctx.fillText('R', rightEye ? rightEye.x * canvas.width + 10 : 0, rightEye ? rightEye.y * canvas.height - 10 : 0);
+              ctx.fillStyle = '#00ff88';
+              ctx.fillText('CENTER', trackingPoint.x * canvas.width + 10, trackingPoint.y * canvas.height - 10);
             }
           }
         }
